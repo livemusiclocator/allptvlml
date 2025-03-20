@@ -235,3 +235,112 @@ export async function findGigsNearLocation(
     throw error;
   }
 }
+
+/**
+ * Extended Gig interface with stop information
+ */
+export interface GigWithStop extends Gig {
+  stopId: number;
+  stopName: string;
+  stopSequence: number;
+}
+
+/**
+ * Find gigs near multiple locations
+ * @param locations Array of {latitude, longitude, stopId} objects
+ * @param maxDistance Maximum distance in meters (default: 500)
+ * @returns Array of gigs with distance_meters and stopId added
+ */
+export async function findGigsNearMultipleLocations(
+  locations: Array<{
+    latitude: number,
+    longitude: number,
+    stopId: number,
+    stopName: string,
+    stopSequence: number
+  }>,
+  maxDistance: number = 500
+): Promise<GigWithStop[]> {
+  console.log(`Finding gigs near ${locations.length} locations`);
+  
+  try {
+    // Fetch today's gigs once
+    const gigs = await getTodaysGigs();
+    console.log(`Fetched ${gigs.length} gigs for today`);
+    
+    // Array to store results
+    const nearbyGigs: GigWithStop[] = [];
+    
+    // Process each location
+    for (const location of locations) {
+      const gigsWithDistance = gigs.map(gig => {
+        const distance = calculateDistance(
+          location.latitude,
+          location.longitude,
+          gig.venue.latitude,
+          gig.venue.longitude
+        );
+        
+        return {
+          ...gig,
+          distance_meters: distance,
+          stopId: location.stopId,
+          stopName: location.stopName,
+          stopSequence: location.stopSequence
+        };
+      });
+      
+      // Filter by distance and add to results
+      const nearbyGigsForLocation = gigsWithDistance
+        .filter(gig => gig.distance_meters <= maxDistance);
+      
+      nearbyGigs.push(...nearbyGigsForLocation);
+    }
+    
+    // Sort by stop sequence and then by distance
+    const sortedGigs = nearbyGigs.sort((a, b) => {
+      if (a.stopSequence !== b.stopSequence) {
+        return a.stopSequence - b.stopSequence;
+      }
+      return (a.distance_meters || 0) - (b.distance_meters || 0);
+    });
+    
+    console.log(`Found ${sortedGigs.length} gigs near ${locations.length} locations`);
+    return sortedGigs;
+  } catch (error) {
+    console.error('Error in findGigsNearMultipleLocations:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * Check if a gig is reachable in time
+ * @param gigStartTime Gig start time (ISO string)
+ * @param currentTime Current time (ISO string)
+ * @param travelTimeMinutes Estimated travel time in minutes
+ * @returns Boolean indicating if the gig is reachable
+ */
+export function isGigReachable(
+  gigStartTime: string,
+  currentTime: string,
+  travelTimeMinutes: number
+): boolean {
+  const gigTime = new Date(gigStartTime);
+  const now = new Date(currentTime);
+  
+  // Add travel time to current time
+  const arrivalTime = new Date(now.getTime() + travelTimeMinutes * 60 * 1000);
+  
+  // Add 2 hours buffer to gig start time (as per requirements)
+  const gigTimePlus2Hours = new Date(gigTime.getTime() + 2 * 60 * 60 * 1000);
+  
+  // Gig is reachable if arrival time is before gig start time + 2 hours
+  return arrivalTime < gigTimePlus2Hours;
+}

@@ -258,8 +258,8 @@ export async function getRouteStops(routeId: number, routeType: number, directio
  * @param stopId The stop ID
  * @param routeType The route type ID
  */
-export async function getStopDetails(stopId: number, routeType: number) {
-  return ptvApiRequest(`/v3/stops/${stopId}/route_type/${routeType}`, {
+export async function getStopDetails(stopId: number, routeType: number): Promise<PTVStopDetails> {
+  return ptvApiRequest<PTVStopDetails>(`/v3/stops/${stopId}/route_type/${routeType}`, {
     stop_location: "true",
     stop_amenities: "true",
     stop_accessibility: "true"
@@ -299,4 +299,186 @@ export async function getDepartures(
     : `/v3/departures/route_type/${routeType}/stop/${stopId}`;
   
   return ptvApiRequest(endpoint, params);
+}
+
+// Define interfaces for PTV API responses
+interface PTVJourney {
+  journey_id: number;
+  journey_name?: string;
+  departure_time: string;
+  arrival_time: string;
+  duration_mins: number;
+  legs: any[];
+}
+
+interface PTVJourneyResponse {
+  journeys: PTVJourney[];
+  status: {
+    version: string;
+    health: number;
+  };
+}
+
+interface PTVStopDetails {
+  stop: {
+    stop_id: number;
+    stop_name: string;
+    stop_latitude: number;
+    stop_longitude: number;
+    stop_sequence?: number;
+    route_type: number;
+  };
+  status: {
+    version: string;
+    health: number;
+  };
+}
+
+/**
+ * Get journey details between two stops
+ * @param fromStopId The origin stop ID
+ * @param toStopId The destination stop ID
+ * @param routeType The route type ID
+ * @returns Journey details including estimated travel time
+ */
+export async function getJourneyBetweenStops(
+  fromStopId: number,
+  toStopId: number,
+  routeType: number
+): Promise<PTVJourneyResponse> {
+  // Current time in Melbourne timezone
+  const now = new Date();
+  const melbourneTime = new Date(now.toLocaleString('en-US', { timeZone: 'Australia/Melbourne' }));
+  
+  // Format date and time for API
+  const date = melbourneTime.toISOString().split('T')[0]; // YYYY-MM-DD
+  const time = melbourneTime.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+  
+  return ptvApiRequest<PTVJourneyResponse>('/v3/journey', {
+    from_stop_id: fromStopId,
+    to_stop_id: toStopId,
+    route_types: routeType,
+    date,
+    time,
+    max_results: 1
+  });
+}
+
+/**
+ * Get estimated travel time between two stops
+ * @param fromStopId The origin stop ID
+ * @param toStopId The destination stop ID
+ * @param routeType The route type ID
+ * @returns Estimated travel time in minutes
+ */
+export async function getEstimatedTravelTime(
+  fromStopId: number,
+  toStopId: number,
+  routeType: number
+): Promise<number> {
+  try {
+    const journeyResponse = await getJourneyBetweenStops(fromStopId, toStopId, routeType);
+    
+    // Extract duration from the first journey in the itinerary
+    if (journeyResponse.journeys && journeyResponse.journeys.length > 0) {
+      return journeyResponse.journeys[0].duration_mins;
+    }
+    
+    // Fallback to a default calculation if no journey data
+    throw new Error('No journey data available');
+  } catch (error) {
+    console.error('Error getting travel time from PTV API:', error);
+    
+    // Fallback to a simple estimation based on average speeds
+    // This is used if the Journey API fails or returns no results
+    return estimateTravelTimeFallback(fromStopId, toStopId, routeType);
+  }
+}
+
+/**
+ * Fallback function to estimate travel time when PTV Journey API fails
+ * @param fromStopId The origin stop ID
+ * @param toStopId The destination stop ID
+ * @param routeType The route type ID
+ * @returns Estimated travel time in minutes
+ */
+async function estimateTravelTimeFallback(
+  fromStopId: number,
+  toStopId: number,
+  routeType: number
+): Promise<number> {
+  // Average speeds by transport mode (km/h)
+  const TRANSPORT_SPEEDS = {
+    0: 40, // Train: 40 km/h
+    1: 20, // Tram: 20 km/h
+    2: 25, // Bus: 25 km/h
+    3: 40, // V/Line: 40 km/h
+    4: 25, // Night Bus: 25 km/h
+    5: 80  // SkyBus: 80 km/h
+  };
+  
+  try {
+    // Get stop details to get coordinates
+    const fromStopDetails = await getStopDetails(fromStopId, routeType);
+    const toStopDetails = await getStopDetails(toStopId, routeType);
+    
+    const fromLat = fromStopDetails.stop.stop_latitude;
+    const fromLon = fromStopDetails.stop.stop_longitude;
+    const toLat = toStopDetails.stop.stop_latitude;
+    const toLon = toStopDetails.stop.stop_longitude;
+    
+    // Calculate distance in kilometers using Haversine formula
+    const distance = calculateDistance(fromLat, fromLon, toLat, toLon) / 1000;
+    
+    // Get average speed for this transport mode
+    const speedKmh = TRANSPORT_SPEEDS[routeType as keyof typeof TRANSPORT_SPEEDS] || 30;
+    
+    // Calculate time in hours, then convert to minutes
+    const timeHours = distance / speedKmh;
+    const timeMinutes = timeHours * 60;
+    
+    // Add a buffer for stops, traffic, etc.
+    return Math.ceil(timeMinutes * 1.2);
+  } catch (error) {
+    console.error('Error in fallback travel time estimation:', error);
+    
+    // If all else fails, return a very rough estimate based on route type
+    const defaultMinutes = {
+      0: 5,  // Train: 5 minutes between stops
+      1: 3,  // Tram: 3 minutes between stops
+      2: 4,  // Bus: 4 minutes between stops
+      3: 10, // V/Line: 10 minutes between stops
+      4: 4,  // Night Bus: 4 minutes between stops
+      5: 15  // SkyBus: 15 minutes between stops
+    };
+    
+    return defaultMinutes[routeType as keyof typeof defaultMinutes] || 5;
+  }
+}
+
+/**
+ * Calculate distance between two points in meters using the Haversine formula
+ * @param lat1 Latitude of point 1
+ * @param lon1 Longitude of point 1
+ * @param lat2 Latitude of point 2
+ * @param lon2 Longitude of point 2
+ * @returns Distance in meters
+ */
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000; // Earth's radius in meters
+  
+  const toRadians = (degrees: number) => degrees * (Math.PI / 180);
+  
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+  
+  return distance;
 }

@@ -32,6 +32,7 @@ interface Stop {
   stop_longitude: number;
   stop_sequence: number;
   route_type: number;
+  absolute_sequence?: number; // Added for better sorting
 }
 
 interface DirectionsResponse {
@@ -196,17 +197,54 @@ export default function RouteDetail() {
           ) as StopsResponse;
         }
         
-        // Ensure we sort stops by sequence for correct order
-        const sortedStops = [...response.stops].sort((a, b) => {
-          // First check if stop_sequence exists and use it
-          if (a.stop_sequence !== undefined && b.stop_sequence !== undefined) {
-            return a.stop_sequence - b.stop_sequence;
+        // Log the raw response to see if stop_sequence is available
+        console.log('Raw stops response:', response.stops);
+        
+        // Check if stop_sequence is available in the response
+        const hasStopSequence = response.stops.some(stop => stop.stop_sequence !== undefined);
+        console.log('Has stop_sequence property:', hasStopSequence);
+        
+        // Process stops to add absolute_sequence for better sorting
+        const processedStops = response.stops.map(stop => {
+          // Create a new object with all properties from the original stop
+          const processedStop = { ...stop };
+          
+          // For tram routes, extract the stop number from the name
+          if (Number(typeId) === 1) {
+            const match = stop.stop_name.match(/#(\d+)/);
+            if (match) {
+              // Store the extracted number as absolute_sequence
+              processedStop.absolute_sequence = parseInt(match[1]);
+              console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop number`);
+            } else if (stop.stop_sequence !== undefined && stop.stop_sequence > 0) {
+              // Use stop_sequence if available and > 0
+              processedStop.absolute_sequence = stop.stop_sequence;
+              console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop_sequence`);
+            } else {
+              // If no number in name or valid stop_sequence, use high number
+              processedStop.absolute_sequence = 999999;
+              console.log(`Tram stop ${stop.stop_name} assigned default high sequence`);
+            }
+          } else {
+            // For non-tram routes, use stop_sequence if > 0, otherwise high number
+            processedStop.absolute_sequence =
+              (stop.stop_sequence !== undefined && stop.stop_sequence > 0)
+                ? stop.stop_sequence
+                : 999999;
           }
-          // Fallback to stop_id if no sequence available
-          return a.stop_id - b.stop_id;
+          
+          return processedStop;
         });
         
-        console.log('Sorted stops by sequence:', sortedStops.map(stop => ({
+        // Sort stops by absolute_sequence
+        const sortedStops = [...processedStops].sort((a, b) => {
+          return (a.absolute_sequence || 999999) - (b.absolute_sequence || 999999);
+        });
+        
+        // Filter out stops with invalid sequence (optional)
+        // const validStops = sortedStops.filter(stop => stop.absolute_sequence !== 999999);
+        
+        console.log('Sorted stops:', sortedStops.map(stop => ({
           name: stop.stop_name,
           sequence: stop.stop_sequence,
           id: stop.stop_id
@@ -357,7 +395,9 @@ export default function RouteDetail() {
                   }`}
                   onClick={() => setSelectedDirection(direction.direction_id)}
                 >
-                  {direction.direction_name.includes('to ') ? direction.direction_name : `to ${direction.direction_name}`}
+                  {direction.direction_name.includes('To ') || direction.direction_name.includes('to ')
+                    ? direction.direction_name
+                    : `to ${direction.direction_name}`}
                 </button>
               ))}
             </div>
@@ -420,6 +460,19 @@ export default function RouteDetail() {
                         Check for nearby gigs
                       </button>
                     )}
+                  </div>
+                  
+                  {/* Stops Ahead Link */}
+                  <div className="mt-2 border-t pt-2">
+                    <Link
+                      href={`/routes/${typeId}/${routeId}/${stop.stop_id}/stops-ahead?directionId=${selectedDirection}`}
+                      className="text-sm text-music-purple hover:underline focus:outline-none inline-flex items-center"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L12.586 11H5a1 1 0 110-2h7.586l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                      View gigs at stops ahead
+                    </Link>
                   </div>
                 </div>
               </div>

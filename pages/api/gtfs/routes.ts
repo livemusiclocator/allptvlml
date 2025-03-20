@@ -1,5 +1,6 @@
-import JSZip from 'jszip';
-import { parse } from 'csv-parse/sync';
+import type { NextApiRequest, NextApiResponse } from 'next';
+import fs from 'fs';
+import path from 'path';
 
 // Define interfaces for GTFS data
 interface GTFSRoute {
@@ -12,17 +13,6 @@ interface GTFSRoute {
   route_text_color?: string;
 }
 
-interface GTFSStop {
-  stop_id: string;
-  stop_name: string;
-  stop_lat: string;
-  stop_lon: string;
-  location_type?: string;
-  parent_station?: string;
-  stop_sequence?: number; // Added for compatibility with PTV API
-  route_id?: string; // Added to associate stops with routes
-}
-
 interface GTFSTrip {
   route_id: string;
   service_id: string;
@@ -30,6 +20,16 @@ interface GTFSTrip {
   trip_headsign?: string;
   direction_id: string;
   shape_id?: string;
+}
+
+interface GTFSStop {
+  stop_id: string;
+  stop_name: string;
+  stop_lat: string;
+  stop_lon: string;
+  location_type?: string;
+  parent_station?: string;
+  route_id?: string; // Added to associate stops with routes
 }
 
 interface GTFSStopTime {
@@ -42,14 +42,7 @@ interface GTFSStopTime {
   drop_off_type?: string;
 }
 
-interface GTFSDirection {
-  direction_id: number;
-  direction_name: string;
-  route_id: string;
-  route_type: number;
-}
-
-// Mock data for client-side rendering
+// Mock data for fallback
 const mockGTFSData = {
   skybus: {
     routes: [
@@ -214,65 +207,15 @@ const mockGTFSData = {
 };
 
 /**
- * Check if code is running on server or client
- * @returns true if running on server, false if running on client
- */
-function isServer() {
-  return typeof window === 'undefined';
-}
-
-/**
- * Fetch data from the GTFS API
- * @param action The API action to perform
- * @param routeType The route type ID
- * @param routeId Optional route ID
- * @param directionId Optional direction ID
- * @returns Promise that resolves to the API response
- */
-async function fetchGTFSData(action: string, routeType: number, routeId?: number, directionId?: number) {
-  try {
-    let url = `/api/gtfs/routes?action=${action}&routeType=${routeType}`;
-    if (routeId !== undefined) {
-      url += `&routeId=${routeId}`;
-    }
-    if (directionId !== undefined) {
-      url += `&directionId=${directionId}`;
-    }
-    
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status} ${response.statusText}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching GTFS data:', error);
-    throw error;
-  }
-}
-
-/**
- * Get routes for a specific route type from GTFS data
+ * Get routes for a specific route type from mock GTFS data
  * @param routeType The route type ID (5 for SkyBus, 4 for Night Bus)
  * @returns Array of routes in a format compatible with PTV API
  */
-export async function getGTFSRoutesByType(routeType: number) {
-  console.log(`Getting GTFS routes for route type ${routeType}`);
+function getMockRoutesByType(routeType: number) {
+  console.log(`Using mock data for route type ${routeType}`);
   
-  try {
-    // Try to fetch from API if in browser
-    if (typeof window !== 'undefined') {
-      return await fetchGTFSData('routes', routeType);
-    }
-  } catch (error) {
-    console.error('Error fetching from API, falling back to mock data:', error);
-  }
-  
-  // Use mock data as fallback
   const mockData = routeType === 5 ? mockGTFSData.skybus : mockGTFSData.nightbus;
   const routes = mockData.routes;
-  
-  console.log(`Using mock data: Found ${routes.length} routes for route type ${routeType}`);
   
   // Convert to PTV API format
   return {
@@ -291,28 +234,18 @@ export async function getGTFSRoutesByType(routeType: number) {
 }
 
 /**
- * Get directions for a specific route from GTFS data
+ * Get directions for a specific route from mock GTFS data
  * @param routeId The route ID
  * @param routeType The route type ID
  * @returns Array of directions in a format compatible with PTV API
  */
-export async function getGTFSRouteDirections(routeId: number, routeType: number) {
-  console.log(`Getting GTFS directions for route ${routeId} (type ${routeType})`);
+function getMockRouteDirections(routeId: number, routeType: number) {
+  console.log(`Using mock data for route ${routeId} (type ${routeType})`);
   
-  try {
-    // Try to fetch from API if in browser
-    if (typeof window !== 'undefined') {
-      return await fetchGTFSData('directions', routeType, routeId);
-    }
-  } catch (error) {
-    console.error('Error fetching from API, falling back to mock data:', error);
-  }
-  
-  // Use mock data as fallback
   const mockData = routeType === 5 ? mockGTFSData.skybus : mockGTFSData.nightbus;
   const directions = mockData.directions.filter(dir => dir.route_id === String(routeId));
   
-  console.log(`Using mock data: Found ${directions.length} directions for route ${routeId}`);
+  console.log(`Found ${directions.length} directions for route ${routeId}`);
   
   // Convert to PTV API format
   return {
@@ -330,31 +263,21 @@ export async function getGTFSRouteDirections(routeId: number, routeType: number)
 }
 
 /**
- * Get stops for a specific route and direction from GTFS data
+ * Get stops for a specific route and direction from mock GTFS data
  * @param routeId The route ID
  * @param routeType The route type ID
  * @param directionId Optional direction ID
  * @returns Array of stops in a format compatible with PTV API
  */
-export async function getGTFSRouteStops(routeId: number, routeType: number, directionId?: number) {
-  console.log(`Getting GTFS stops for route ${routeId} (type ${routeType}), direction ${directionId}`);
+function getMockRouteStops(routeId: number, routeType: number, directionId?: number) {
+  console.log(`Using mock data for route ${routeId} (type ${routeType}), direction ${directionId}`);
   
-  try {
-    // Try to fetch from API if in browser
-    if (typeof window !== 'undefined') {
-      return await fetchGTFSData('stops', routeType, routeId, directionId);
-    }
-  } catch (error) {
-    console.error('Error fetching from API, falling back to mock data:', error);
-  }
-  
-  // Use mock data as fallback
   const mockData = routeType === 5 ? mockGTFSData.skybus : mockGTFSData.nightbus;
   
   // Filter stops by route_id
   const stops = mockData.stops.filter(stop => stop.route_id === String(routeId));
   
-  console.log(`Using mock data: Found ${stops.length} stops for route ${routeId}`);
+  console.log(`Found ${stops.length} stops for route ${routeId}`);
   
   // Convert to PTV API format
   const routeStops = stops.map(stop => ({
@@ -362,7 +285,7 @@ export async function getGTFSRouteStops(routeId: number, routeType: number, dire
     stop_name: stop.stop_name,
     stop_latitude: parseFloat(stop.stop_lat),
     stop_longitude: parseFloat(stop.stop_lon),
-    stop_sequence: stop.stop_sequence,
+    stop_sequence: stop.stop_sequence || 0,
     route_type: routeType
   }));
   
@@ -376,4 +299,51 @@ export async function getGTFSRouteStops(routeId: number, routeType: number, dire
       health: 1
     }
   };
+}
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const { routeType, routeId, directionId, action } = req.query;
+  
+  try {
+    // Validate route type
+    if (!routeType || (Number(routeType) !== 4 && Number(routeType) !== 5)) {
+      return res.status(400).json({ error: 'Invalid or missing route type. Must be 4 (Night Bus) or 5 (SkyBus).' });
+    }
+    
+    const routeTypeNum = Number(routeType);
+    
+    // Handle different actions
+    switch (action) {
+      case 'routes':
+        // Get all routes for the specified route type
+        return res.status(200).json(getMockRoutesByType(routeTypeNum));
+        
+      case 'directions':
+        // Get directions for a specific route
+        if (!routeId) {
+          return res.status(400).json({ error: 'Missing route ID' });
+        }
+        return res.status(200).json(getMockRouteDirections(Number(routeId), routeTypeNum));
+        
+      case 'stops':
+        // Get stops for a specific route and direction
+        if (!routeId) {
+          return res.status(400).json({ error: 'Missing route ID' });
+        }
+        return res.status(200).json(getMockRouteStops(
+          Number(routeId), 
+          routeTypeNum, 
+          directionId ? Number(directionId) : undefined
+        ));
+        
+      default:
+        return res.status(400).json({ error: 'Invalid action. Must be "routes", "directions", or "stops".' });
+    }
+  } catch (error) {
+    console.error('API error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 }
