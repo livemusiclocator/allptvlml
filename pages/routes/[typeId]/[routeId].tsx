@@ -4,6 +4,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import Layout from '@/components/Layout';
 import { getRouteDirections, getRouteStops } from '@/lib/ptv-api';
+import { getGTFSRouteDirections, getGTFSRouteStops } from '@/lib/gtfs-api';
 import { findGigsNearLocation } from '@/lib/lml-api';
 import type { Gig } from '@/lib/lml-api';
 
@@ -100,7 +101,17 @@ export default function RouteDetail() {
           }
         }
         
-        const response = await getRouteDirections(Number(routeId)) as DirectionsResponse;
+        let response: DirectionsResponse;
+        
+        // Use GTFS data for SkyBus and Night Bus
+        if (Number(typeId) === 5 || Number(typeId) === 4) {
+          console.log(`Using GTFS data for route type ${typeId}`);
+          response = await getGTFSRouteDirections(Number(routeId), Number(typeId)) as DirectionsResponse;
+        } else {
+          console.log(`Using PTV API for route type ${typeId}`);
+          response = await getRouteDirections(Number(routeId)) as DirectionsResponse;
+        }
+        
         setDirections(response.directions);
         
         // Set the first direction as selected by default
@@ -166,11 +177,24 @@ export default function RouteDetail() {
           }
         }
         
-        const response = await getRouteStops(
-          Number(routeId),
-          Number(typeId),
-          selectedDirection
-        ) as StopsResponse;
+        let response: StopsResponse;
+        
+        // Use GTFS data for SkyBus and Night Bus
+        if (Number(typeId) === 5 || Number(typeId) === 4) {
+          console.log(`Using GTFS data for route type ${typeId}`);
+          response = await getGTFSRouteStops(
+            Number(routeId),
+            Number(typeId),
+            selectedDirection
+          ) as StopsResponse;
+        } else {
+          console.log(`Using PTV API for route type ${typeId}`);
+          response = await getRouteStops(
+            Number(routeId),
+            Number(typeId),
+            selectedDirection
+          ) as StopsResponse;
+        }
         
         // Ensure we sort stops by sequence for correct order
         const sortedStops = [...response.stops].sort((a, b) => {
@@ -181,6 +205,12 @@ export default function RouteDetail() {
           // Fallback to stop_id if no sequence available
           return a.stop_id - b.stop_id;
         });
+        
+        console.log('Sorted stops by sequence:', sortedStops.map(stop => ({
+          name: stop.stop_name,
+          sequence: stop.stop_sequence,
+          id: stop.stop_id
+        })));
         
         // Initialize stops with empty gigs arrays
         const stopsWithGigs = sortedStops.map(stop => ({
@@ -218,17 +248,35 @@ export default function RouteDetail() {
   
   // Function to load gigs for a specific stop
   const loadGigsForStop = async (stopIndex: number) => {
+    console.log(`Loading gigs for stop index ${stopIndex}`);
     const stop = stops[stopIndex];
+    console.log(`Stop details:`, {
+      name: stop.stop_name,
+      latitude: stop.stop_latitude,
+      longitude: stop.stop_longitude,
+      isLoadingGigs: stop.isLoadingGigs,
+      hasGigs: stop.nearbyGigs.length > 0
+    });
     
     // Skip if already loading or has gigs
-    if (stop.isLoadingGigs || stop.nearbyGigs.length > 0) return;
+    if (stop.isLoadingGigs || stop.nearbyGigs.length > 0) {
+      console.log('Skipping - already loading or has gigs');
+      return;
+    }
     
     // Update loading state
     const updatedStops = [...stops];
     updatedStops[stopIndex] = { ...stop, isLoadingGigs: true };
     setStops(updatedStops);
+    console.log('Updated loading state to true');
     
     try {
+      console.log('Calling findGigsNearLocation with:', {
+        latitude: stop.stop_latitude,
+        longitude: stop.stop_longitude,
+        radius: 500
+      });
+      
       // Find gigs near this stop
       const gigs = await findGigsNearLocation(
         stop.stop_latitude,
@@ -236,25 +284,36 @@ export default function RouteDetail() {
         500 // 500 meters radius
       );
       
+      console.log(`Found ${gigs.length} gigs near ${stop.stop_name}`);
+      
       // Update stops with gigs
       const newUpdatedStops = [...stops];
-      newUpdatedStops[stopIndex] = { 
-        ...stop, 
+      newUpdatedStops[stopIndex] = {
+        ...stop,
         nearbyGigs: gigs,
-        isLoadingGigs: false 
+        isLoadingGigs: false
       };
       setStops(newUpdatedStops);
+      console.log('Updated stops with gigs');
     } catch (err) {
       console.error('Error fetching gigs for stop:', err);
+      if (err instanceof Error) {
+        console.error('Error details:', {
+          name: err.name,
+          message: err.message,
+          stack: err.stack
+        });
+      }
       
       // Update loading state even on error
       const newUpdatedStops = [...stops];
-      newUpdatedStops[stopIndex] = { 
-        ...stop, 
+      newUpdatedStops[stopIndex] = {
+        ...stop,
         isLoadingGigs: false,
-        nearbyGigs: [] 
+        nearbyGigs: []
       };
       setStops(newUpdatedStops);
+      console.log('Updated loading state to false after error');
     }
   };
   
@@ -298,7 +357,7 @@ export default function RouteDetail() {
                   }`}
                   onClick={() => setSelectedDirection(direction.direction_id)}
                 >
-                  {direction.direction_name}
+                  {direction.direction_name.includes('to ') ? direction.direction_name : `to ${direction.direction_name}`}
                 </button>
               ))}
             </div>

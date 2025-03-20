@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 
 type RouteTypeCardProps = {
   id: number;
@@ -8,6 +9,16 @@ type RouteTypeCardProps = {
 };
 
 export default function RouteTypeCard({ id, name, icon, color }: RouteTypeCardProps) {
+  const router = useRouter();
+  
+  // Log routing information for debugging
+  console.log('RouteTypeCard - Router info:', {
+    pathname: router.pathname,
+    asPath: router.asPath,
+    basePath: router.basePath,
+    query: router.query,
+    isReady: router.isReady
+  });
   // Function to get the appropriate icon
   const getIcon = () => {
     switch (icon) {
@@ -73,14 +84,25 @@ export default function RouteTypeCard({ id, name, icon, color }: RouteTypeCardPr
     }
   };
 
+  // Create the route path, ensuring it works with basePath
+  const routePath = `/routes/${id}`;
+  console.log(`RouteTypeCard - Generated route path: ${routePath} for ${name}`);
+  
   return (
-    <Link href={`/routes/${id}`} className="card hover:shadow-lg transition-shadow">
+    <Link
+      href={routePath}
+      className="card hover:shadow-lg transition-shadow"
+      onClick={(e) => {
+        console.log(`Clicked on ${name} route card, navigating to ${routePath}`);
+      }}
+    >
       <div className={`p-6 flex flex-col items-center text-${color}`}>
         <div className="mb-4">{getIcon()}</div>
         <h2 className="text-xl font-semibold mb-2">{name}</h2>
         <p className="text-gray-600 text-sm text-center">
           View all {name.toLowerCase()} routes and stops
         </p>
+        <div className="mt-2 text-xs text-gray-400">ID: {id}</div>
       </div>
     </Link>
   );

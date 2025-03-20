@@ -46,6 +46,8 @@ export interface Gig {
  * @returns The API response data
  */
 export async function lmlApiRequest<T>(endpoint: string, params: Record<string, string | number> = {}): Promise<T> {
+  console.log(`LML API Request - Endpoint: ${endpoint}`);
+  
   // Build the query string from params
   const queryParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -54,17 +56,42 @@ export async function lmlApiRequest<T>(endpoint: string, params: Record<string, 
   
   // Build the full URL
   const url = `${LML_BASE_URL}${endpoint}${Object.keys(params).length > 0 ? '?' + queryParams.toString() : ''}`;
+  console.log(`Full API URL: ${url}`);
   
   try {
+    console.log('Sending API request...');
     const response = await axios.get<T>(url);
+    console.log('API Response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      dataSize: JSON.stringify(response.data).length
+    });
+    
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response) {
-      throw new LMLApiError(
-        `LML API error: ${error.response.status} ${error.response.statusText}`,
-        error.response.status
-      );
+    console.error('LML API Request failed:', error);
+    
+    if (axios.isAxiosError(error)) {
+      console.error('Axios Error Details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+        config: {
+          url: error.config?.url,
+          method: error.config?.method,
+          headers: error.config?.headers
+        }
+      });
+      
+      if (error.response) {
+        throw new LMLApiError(
+          `LML API error: ${error.response.status} ${error.response.statusText}`,
+          error.response.status
+        );
+      }
     }
+    
     throw new Error(`LML API request failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -75,13 +102,48 @@ export async function lmlApiRequest<T>(endpoint: string, params: Record<string, 
  * @returns Array of gigs
  */
 export async function getTodaysGigs(location: string = 'melbourne'): Promise<Gig[]> {
+  console.log(`Getting today's gigs for location: ${location}`);
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  console.log(`Today's date: ${today}`);
   
-  return lmlApiRequest<Gig[]>('/gigs/query', {
-    location,
-    date_from: today,
-    date_to: today
-  });
+  try {
+    console.log(`Making API request to /gigs/query with params:`, {
+      location,
+      date_from: today,
+      date_to: today
+    });
+    
+    const gigs = await lmlApiRequest<Gig[]>('/gigs/query', {
+      location,
+      date_from: today,
+      date_to: today
+    });
+    
+    console.log(`Received ${gigs.length} gigs from API`);
+    
+    // Log a sample gig for debugging
+    if (gigs.length > 0) {
+      console.log('Sample gig:', {
+        id: gigs[0].id,
+        name: gigs[0].name,
+        venue: gigs[0].venue.name,
+        hasCoordinates: gigs[0].venue.latitude !== undefined && gigs[0].venue.longitude !== undefined
+      });
+    }
+    
+    return gigs;
+  } catch (error) {
+    console.error('Error in getTodaysGigs:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+    // Return empty array instead of throwing to prevent cascading failures
+    return [];
+  }
 }
 
 /**
@@ -123,10 +185,15 @@ export async function findGigsNearLocation(
   longitude: number,
   maxDistance: number = 500
 ): Promise<Gig[]> {
-  const gigs = await getTodaysGigs();
+  console.log(`Finding gigs near location: lat=${latitude}, lon=${longitude}, maxDistance=${maxDistance}m`);
   
-  return gigs
-    .map(gig => {
+  try {
+    console.log('Fetching today\'s gigs...');
+    const gigs = await getTodaysGigs();
+    console.log(`Fetched ${gigs.length} gigs for today`);
+    
+    console.log('Calculating distances and filtering by proximity...');
+    const gigsWithDistance = gigs.map(gig => {
       const distance = calculateDistance(
         latitude,
         longitude,
@@ -138,7 +205,33 @@ export async function findGigsNearLocation(
         ...gig,
         distance_meters: distance
       };
-    })
-    .filter(gig => gig.distance_meters <= maxDistance)
-    .sort((a, b) => (a.distance_meters || 0) - (b.distance_meters || 0));
+    });
+    
+    const nearbyGigs = gigsWithDistance
+      .filter(gig => gig.distance_meters <= maxDistance)
+      .sort((a, b) => (a.distance_meters || 0) - (b.distance_meters || 0));
+    
+    console.log(`Found ${nearbyGigs.length} gigs within ${maxDistance}m`);
+    
+    // Log the first few nearby gigs for debugging
+    if (nearbyGigs.length > 0) {
+      console.log('First nearby gig:', {
+        name: nearbyGigs[0].name,
+        venue: nearbyGigs[0].venue.name,
+        distance: Math.round(nearbyGigs[0].distance_meters || 0)
+      });
+    }
+    
+    return nearbyGigs;
+  } catch (error) {
+    console.error('Error in findGigsNearLocation:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+    throw error;
+  }
 }

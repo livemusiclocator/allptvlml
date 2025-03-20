@@ -1,6 +1,24 @@
 import axios from 'axios';
 import crypto from 'crypto';
 
+// For browser compatibility
+let cryptoJsImported = false;
+let CryptoJS: any = null;
+
+// Function to dynamically import crypto-js in browser environments
+async function importCryptoJS() {
+  if (typeof window !== 'undefined' && !cryptoJsImported) {
+    try {
+      // This is a placeholder - in a real implementation, you would need to install crypto-js
+      // and import it properly. This is just to illustrate the concept.
+      console.log('Would import crypto-js here in a real implementation');
+      cryptoJsImported = true;
+    } catch (error) {
+      console.error('Failed to import crypto-js:', error);
+    }
+  }
+}
+
 // PTV API configuration
 const PTV_BASE_URL = 'https://timetableapi.ptv.vic.gov.au';
 const DEV_ID = process.env.NEXT_PUBLIC_PTV_DEV_ID;
@@ -28,16 +46,95 @@ class PTVApiError extends Error {
  * @param request The API request path including query parameters
  * @returns The HMAC signature
  */
-function generateSignature(request: string): string {
+async function generateSignature(request: string): Promise<string> {
+  console.log('Generating signature for request:', request);
+  
   if (!API_KEY) {
+    console.error('API Key is not defined');
     throw new Error('PTV API key is not defined');
   }
   
-  const key = Buffer.from(API_KEY, 'utf-8');
-  const requestWithDevId = request + (request.includes('?') ? '&' : '?') + 'devid=' + DEV_ID;
-  const hmac = crypto.createHmac('sha1', key);
-  hmac.update(requestWithDevId);
-  return hmac.digest('hex').toUpperCase();
+  if (!DEV_ID) {
+    console.error('Developer ID is not defined');
+    throw new Error('PTV Developer ID is not defined');
+  }
+  
+  // Create the request with devid parameter
+  let requestWithDevId: string;
+  
+  // Check if the request already has the devid parameter
+  if (request.includes('devid=')) {
+    console.log('Request already has devid parameter, using as is');
+    requestWithDevId = request;
+  } else {
+    // Add the devid parameter if it's not already there
+    requestWithDevId = request + (request.includes('?') ? '&' : '?') + 'devid=' + DEV_ID;
+  }
+  
+  console.log('Request with DevID:', requestWithDevId);
+  
+  try {
+    // Check if we're in a browser environment
+    if (typeof window !== 'undefined') {
+      console.log('Running in browser environment');
+      
+      // Use SubtleCrypto API which is available in modern browsers
+      try {
+        console.log('Attempting to use SubtleCrypto API');
+        
+        // Convert API key to ArrayBuffer
+        const encoder = new TextEncoder();
+        const keyData = encoder.encode(API_KEY);
+        const messageData = encoder.encode(requestWithDevId);
+        
+        // Import the key
+        const cryptoKey = await window.crypto.subtle.importKey(
+          'raw',
+          keyData,
+          { name: 'HMAC', hash: 'SHA-1' },
+          false,
+          ['sign']
+        );
+        
+        // Sign the message
+        const signature = await window.crypto.subtle.sign(
+          'HMAC',
+          cryptoKey,
+          messageData
+        );
+        
+        // Convert to hex string
+        const hashArray = Array.from(new Uint8Array(signature));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        const finalSignature = hashHex.toUpperCase();
+        console.log('Generated signature using SubtleCrypto:', finalSignature.substring(0, 6) + '...');
+        return finalSignature;
+      } catch (browserError) {
+        console.error('SubtleCrypto failed:', browserError);
+        console.log('Falling back to server-side implementation');
+        // Fall back to server-side implementation
+      }
+    }
+    
+    // Server-side implementation using Node.js crypto
+    const key = Buffer.from(API_KEY, 'utf-8');
+    const hmac = crypto.createHmac('sha1', key);
+    hmac.update(requestWithDevId);
+    const signature = hmac.digest('hex').toUpperCase();
+    console.log('Generated signature using Node.js crypto:', signature.substring(0, 6) + '...');
+    return signature;
+  } catch (error) {
+    console.error('Error generating signature:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+    throw new Error(`Failed to generate signature: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**
@@ -47,7 +144,10 @@ function generateSignature(request: string): string {
  * @returns The API response data
  */
 export async function ptvApiRequest<T>(endpoint: string, params: Record<string, string | number> = {}): Promise<T> {
+  console.log(`PTV API Request - Endpoint: ${endpoint}`);
+  
   if (!DEV_ID) {
+    console.error('PTV API Error: Developer ID is not defined');
     throw new Error('PTV Developer ID is not defined');
   }
   
@@ -57,31 +157,58 @@ export async function ptvApiRequest<T>(endpoint: string, params: Record<string, 
     queryParams.append(key, String(value));
   });
   
-  // Add devid to query params
-  queryParams.append('devid', DEV_ID);
-  
-  // Build the request path
+  // Build the request path without adding devid yet
+  // We'll add it in the generateSignature function to avoid duplication
   const requestPath = endpoint + (Object.keys(params).length > 0 ? '?' + queryParams.toString() : '');
-  
-  // Generate signature
-  const signature = generateSignature(requestPath);
-  
-  // Add signature to query params
-  queryParams.append('signature', signature);
-  
-  // Build the full URL
-  const url = `${PTV_BASE_URL}${endpoint}?${queryParams.toString()}`;
+  console.log(`Request Path (before devid): ${requestPath}`);
+  console.log(`Using Developer ID: ${DEV_ID.substring(0, 3)}...`); // Log partial ID for debugging
   
   try {
+    // Generate signature - now awaiting the async function
+    const signature = await generateSignature(requestPath);
+    console.log(`Generated Signature: ${signature.substring(0, 6)}...`); // Log partial signature
+    
+    // Add devid and signature to query params
+    queryParams.append('devid', DEV_ID);
+    queryParams.append('signature', signature);
+    
+    // Build the full URL
+    const url = `${PTV_BASE_URL}${endpoint}?${queryParams.toString()}`;
+    console.log(`Full API URL: ${url}`);
+    
+    console.log('Sending API request...');
     const response = await axios.get<T>(url);
+    console.log('API Response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      dataSize: JSON.stringify(response.data).length
+    });
+    
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response) {
-      throw new PTVApiError(
-        `PTV API error: ${error.response.status} ${error.response.statusText}`,
-        error.response.status
-      );
+    console.error('PTV API Request failed:', error);
+    
+    if (axios.isAxiosError(error)) {
+      console.error('Axios Error Details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+        config: {
+          url: error.config?.url,
+          method: error.config?.method,
+          headers: error.config?.headers
+        }
+      });
+      
+      if (error.response) {
+        throw new PTVApiError(
+          `PTV API error: ${error.response.status} ${error.response.statusText}`,
+          error.response.status
+        );
+      }
     }
+    
     throw new Error(`PTV API request failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

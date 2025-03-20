@@ -4,6 +4,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import Layout from '@/components/Layout';
 import { getRoutesByType } from '@/lib/ptv-api';
+import { getGTFSRoutesByType } from '@/lib/gtfs-api';
 
 // Define route type names
 const routeTypeNames = {
@@ -92,7 +93,32 @@ export default function RoutesByType() {
     
     const refreshRoutes = async () => {
       try {
-        const response = await getRoutesByType(Number(typeId)) as RoutesResponse;
+        console.log(`Fetching routes for type ID: ${typeId}`);
+        
+        // Log environment variables (without exposing sensitive data)
+        console.log('Environment check:', {
+          devIdExists: !!process.env.NEXT_PUBLIC_PTV_DEV_ID,
+          apiKeyExists: !!process.env.NEXT_PUBLIC_PTV_API_KEY,
+          nodeEnv: process.env.NODE_ENV,
+          basePath: process.env.NODE_ENV === 'production' ? '/ptv-lml' : ''
+        });
+        
+        let response: RoutesResponse;
+        
+        // Use GTFS data for SkyBus and Night Bus
+        if (Number(typeId) === 5 || Number(typeId) === 4) {
+          console.log(`Using GTFS data for route type ${typeId}`);
+          response = await getGTFSRoutesByType(Number(typeId)) as RoutesResponse;
+        } else {
+          console.log(`Using PTV API for route type ${typeId}`);
+          response = await getRoutesByType(Number(typeId)) as RoutesResponse;
+        }
+        
+        console.log('API Response received:', {
+          status: response.status,
+          routesCount: response.routes?.length || 0
+        });
+        
         const sortedRoutes = response.routes.sort((a, b) => {
           // Sort by route number if available, otherwise by name
           if (a.route_number && b.route_number) {
@@ -101,6 +127,7 @@ export default function RoutesByType() {
           return a.route_name.localeCompare(b.route_name);
         });
         
+        console.log(`Sorted ${sortedRoutes.length} routes`);
         setRoutes(sortedRoutes);
         setLoading(false);
         
@@ -109,12 +136,21 @@ export default function RoutesByType() {
           try {
             localStorage.setItem(`routes_type_${typeId}`, JSON.stringify(sortedRoutes));
             localStorage.setItem(`routes_type_${typeId}_timestamp`, Date.now().toString());
+            console.log('Routes cached successfully');
           } catch (localStorageError) {
             console.error('LocalStorage saving error:', localStorageError);
             // Continue even if localStorage fails
           }
         }
       } catch (err) {
+        console.error('Error in refreshRoutes:', err);
+        if (err instanceof Error) {
+          console.error('Error details:', {
+            name: err.name,
+            message: err.message,
+            stack: err.stack
+          });
+        }
         throw err; // Re-throw to be caught by the outer try/catch
       }
     };
