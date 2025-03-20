@@ -1,0 +1,10 @@
+This is a placeholder for favicon.ico.
+
+In a real project, you would replace this with an actual favicon.ico file.
+The favicon should be a 16x16 or 32x32 pixel icon that represents the PTV-LML application.
+
+Suggested colors:
+- PTV Blue: #0072ce
+- Music Purple: #9b59b6
+
+The icon could combine elements of public transport (like a train or tram icon) with music (like a music note).
