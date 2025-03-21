@@ -246,11 +246,48 @@ export async function getRouteDirections(routeId: number) {
  */
 export async function getRouteStops(routeId: number, routeType: number, directionId?: number) {
   const params: Record<string, string | number> = {};
+  
+  // Direction ID is REQUIRED to get the proper sequence of stops
   if (directionId !== undefined) {
     params.direction_id = directionId;
+    console.log(`Getting stops for route ${routeId}, type ${routeType}, direction ${directionId}`);
+  } else {
+    console.log(`WARNING: No direction_id specified for route ${routeId}. Stops may not be in correct sequence.`);
+    // This is problematic - without direction_id, stops won't be in proper sequence
+    // but we don't throw an error to maintain compatibility with existing code
   }
   
-  return ptvApiRequest(`/v3/stops/route/${routeId}/route_type/${routeType}`, params);
+  // Include stop distance information
+  params.include_distance = "true";
+  
+  // For ALL routes, ensure we get as much ordering info as possible
+  console.log(`Requesting stop_sequence information`);
+  params.stop_disruptions = "false"; // Reduce response size
+  params.include_geopath = "false"; // Reduce response size
+  
+  // Set max results to a high number to ensure we get all stops
+  params.max_results = 1000;
+  
+  try {
+    const response = await ptvApiRequest<{stops: any[]; status: any}>(`/v3/stops/route/${routeId}/route_type/${routeType}`, params);
+    
+    // Log stop sequence information for debugging
+    if (response && response.stops && response.stops.length > 0) {
+      const stops = response.stops;
+      console.log(`Received ${stops.length} stops with sequence info:`, 
+        stops.slice(0, 3).map((s: any) => ({
+          id: s.stop_id,
+          name: s.stop_name,
+          sequence: s.stop_sequence
+        }))
+      );
+    }
+    
+    return response;
+  } catch (error) {
+    console.error(`Error fetching stops for route ${routeId}, type ${routeType}:`, error);
+    throw error;
+  }
 }
 
 /**

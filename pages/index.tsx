@@ -9,9 +9,7 @@ const routeTypes = [
   { id: 0, name: 'Train', icon: 'train', color: 'train-blue' },
   { id: 1, name: 'Tram', icon: 'tram', color: 'tram-green' },
   { id: 2, name: 'Bus', icon: 'bus', color: 'bus-orange' },
-  { id: 3, name: 'V/Line', icon: 'train', color: 'train-blue' },
-  { id: 4, name: 'Night Bus', icon: 'bus', color: 'bus-orange' },
-  { id: 5, name: 'SkyBus', icon: 'skybus', color: 'skybus-red' },
+  { id: 3, name: 'V/Line', icon: 'train', color: 'train-blue' }
 ];
 
 export default function Home() {

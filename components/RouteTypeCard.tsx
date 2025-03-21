@@ -54,20 +54,6 @@ export default function RouteTypeCard({ id, name, icon, color }: RouteTypeCardPr
             <path d="M18 18v3" />
           </svg>
         );
-      case 'skybus':
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 6v6" />
-            <path d="M16 6v6" />
-            <path d="M2 12h20" />
-            <path d="M7 18h10" />
-            <rect x="4" y="6" width="16" height="12" rx="2" />
-            <path d="M6 18v3" />
-            <path d="M18 18v3" />
-            <path d="M2 6h20" />
-            <path d="M4 2h16" />
-          </svg>
-        );
       default:
         // Fallback to bus icon for any other type
         return (

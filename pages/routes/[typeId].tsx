@@ -4,16 +4,13 @@ import Head from 'next/head';
 import Link from 'next/link';
 import Layout from '@/components/Layout';
 import { getRoutesByType } from '@/lib/ptv-api';
-import { getGTFSRoutesByType } from '@/lib/gtfs-api';
 
 // Define route type names
 const routeTypeNames = {
   '0': 'Train',
   '1': 'Tram',
   '2': 'Bus',
-  '3': 'V/Line',
-  '4': 'Night Bus',
-  '5': 'SkyBus'
+  '3': 'V/Line'
 };
 
 // Define route type colors
@@ -21,9 +18,7 @@ const routeTypeColors = {
   '0': 'train-blue',
   '1': 'tram-green',
   '2': 'bus-orange',
-  '3': 'train-blue',
-  '4': 'bus-orange',
-  '5': 'skybus-red'
+  '3': 'train-blue'
 };
 
 interface Route {
@@ -105,14 +100,9 @@ export default function RoutesByType() {
         
         let response: RoutesResponse;
         
-        // Use GTFS data for SkyBus and Night Bus
-        if (Number(typeId) === 5 || Number(typeId) === 4) {
-          console.log(`Using GTFS data for route type ${typeId}`);
-          response = await getGTFSRoutesByType(Number(typeId)) as RoutesResponse;
-        } else {
-          console.log(`Using PTV API for route type ${typeId}`);
-          response = await getRoutesByType(Number(typeId)) as RoutesResponse;
-        }
+        // Use PTV API for all route types
+        console.log(`Using PTV API for route type ${typeId}`);
+        response = await getRoutesByType(Number(typeId)) as RoutesResponse;
         
         console.log('API Response received:', {
           status: response.status,
@@ -240,7 +230,11 @@ export default function RoutesByType() {
                           {route.route_number}
                         </span>
                       )}
-                      <h2 className="text-lg font-semibold">{route.route_name}</h2>
+                      <h2 className="text-lg font-semibold">
+                        {route.route_number && Number(typeId) === 1 && `Number ${route.route_number}: `}
+                        {route.route_number && Number(typeId) === 2 && `Route ${route.route_number}: `}
+                        {route.route_name}
+                      </h2>
                     </div>
                   </div>
                 </Link>

@@ -3,8 +3,7 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
 import Layout from '@/components/Layout';
-import { getRouteDirections, getRouteStops } from '@/lib/ptv-api';
-import { getGTFSRouteDirections, getGTFSRouteStops } from '@/lib/gtfs-api';
+import { getRouteDirections, getRouteStops, getRoutesByType } from '@/lib/ptv-api';
 import { findGigsNearLocation } from '@/lib/lml-api';
 import type { Gig } from '@/lib/lml-api';
 
@@ -13,10 +12,24 @@ const routeTypeColors = {
   '0': 'train-blue',
   '1': 'tram-green',
   '2': 'bus-orange',
-  '3': 'train-blue',
-  '4': 'bus-orange',
-  '5': 'skybus-red'
+  '3': 'train-blue'
 };
+
+interface Route {
+  route_id: number;
+  route_name: string;
+  route_number: string;
+  route_type: number;
+  route_gtfs_id?: string;
+}
+
+interface RoutesResponse {
+  routes: Route[];
+  status: {
+    version: string;
+    health: number;
+  };
+}
 
 interface Direction {
   direction_id: number;
@@ -66,6 +79,7 @@ export default function RouteDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [routeName, setRouteName] = useState('');
+  const [routeNumber, setRouteNumber] = useState('');
   
   // Check if window is defined (client-side only)
   const isClient = typeof window !== 'undefined';
@@ -87,6 +101,8 @@ export default function RouteDetail() {
               const parsed = JSON.parse(cachedData);
               setDirections(parsed.directions);
               setRouteName(parsed.routeName || '');
+              setRouteNumber(parsed.routeNumber || '');
+              console.log(`Loaded cached route number: ${parsed.routeNumber}`);
               
               // Set the first direction as selected by default
               if (parsed.directions.length > 0 && !selectedDirection) {
@@ -104,14 +120,9 @@ export default function RouteDetail() {
         
         let response: DirectionsResponse;
         
-        // Use GTFS data for SkyBus and Night Bus
-        if (Number(typeId) === 5 || Number(typeId) === 4) {
-          console.log(`Using GTFS data for route type ${typeId}`);
-          response = await getGTFSRouteDirections(Number(routeId), Number(typeId)) as DirectionsResponse;
-        } else {
-          console.log(`Using PTV API for route type ${typeId}`);
-          response = await getRouteDirections(Number(routeId)) as DirectionsResponse;
-        }
+        // Use PTV API for all route types
+        console.log(`Using PTV API for route type ${typeId}`);
+        response = await getRouteDirections(Number(routeId)) as DirectionsResponse;
         
         setDirections(response.directions);
         
@@ -120,13 +131,36 @@ export default function RouteDetail() {
           setSelectedDirection(response.directions[0].direction_id);
         }
         
+        // Variable to store route data for caching
+        let routeNameToCache = '';
+        let routeNumberToCache = '';
+        
+        // Try to get route details to find the route number
+        try {
+          const routesResponse = await getRoutesByType(Number(typeId)) as RoutesResponse;
+          const route = routesResponse.routes.find((r: Route) => r.route_id === Number(routeId));
+          if (route) {
+            routeNameToCache = route.route_name;
+            routeNumberToCache = route.route_number;
+            setRouteName(routeNameToCache);
+            setRouteNumber(routeNumberToCache);
+            console.log(`Found route: ${routeNameToCache}, number: ${routeNumberToCache}`);
+          }
+        } catch (routeError) {
+          console.error('Error fetching route details:', routeError);
+        }
+        
         // Cache the data (client-side only)
         if (isClient) {
           try {
             localStorage.setItem(`directions_route_${routeId}`, JSON.stringify({
               directions: response.directions,
+              routeName: routeNameToCache,
+              routeNumber: routeNumberToCache,
               timestamp: Date.now()
             }));
+            
+            console.log(`Cached route data with name: ${routeNameToCache}, number: ${routeNumberToCache}`);
           } catch (localStorageError) {
             console.error('LocalStorage saving error:', localStorageError);
             // Continue even if localStorage fails
@@ -188,17 +222,8 @@ export default function RouteDetail() {
         };
         
         try {
-          // Use GTFS data for SkyBus and Night Bus
-          if (Number(typeId) === 5 || Number(typeId) === 4) {
-            console.log(`Using GTFS data for route type ${typeId}`);
-            response = await getGTFSRouteStops(
-              Number(routeId),
-              Number(typeId),
-              selectedDirection
-            ) as StopsResponse;
-          }
           // Special handling for tram routes #11 and #96 which might have issues
-          else if (Number(typeId) === 1 && (Number(routeId) === 11 || Number(routeId) === 96)) {
+          if (Number(typeId) === 1 && (Number(routeId) === 11 || Number(routeId) === 96)) {
             console.log(`Using PTV API with fallback for tram route ${routeId}`);
             try {
               // Try PTV API first
@@ -213,55 +238,44 @@ export default function RouteDetail() {
               // If the selected direction fails, try to get all available directions for this route
               console.log(`Fetching all available directions for route ${routeId}`);
               
-              try {
-                // Get all directions for this route
-                const directionsResponse = await getRouteDirections(Number(routeId)) as DirectionsResponse;
-                const availableDirections = directionsResponse.directions.map(d => d.direction_id);
+              // Get all directions for this route
+              const directionsResponse = await getRouteDirections(Number(routeId)) as DirectionsResponse;
+              const availableDirections = directionsResponse.directions.map(d => d.direction_id);
+              
+              console.log(`Available directions for route ${routeId}:`, availableDirections);
+              
+              // Filter out the current direction that already failed
+              const alternativeDirections = availableDirections.filter(d => d !== selectedDirection);
+              
+              if (alternativeDirections.length > 0) {
+                // Try each alternative direction until one works
+                let foundValidDirection = false;
                 
-                console.log(`Available directions for route ${routeId}:`, availableDirections);
-                
-                // Filter out the current direction that already failed
-                const alternativeDirections = availableDirections.filter(d => d !== selectedDirection);
-                
-                if (alternativeDirections.length > 0) {
-                  // Try each alternative direction until one works
-                  let foundValidDirection = false;
+                for (const altDirection of alternativeDirections) {
+                  console.log(`Trying alternative direction ${altDirection} for route ${routeId}`);
                   
-                  for (const altDirection of alternativeDirections) {
-                    console.log(`Trying alternative direction ${altDirection} for route ${routeId}`);
+                  try {
+                    response = await getRouteStops(
+                      Number(routeId),
+                      Number(typeId),
+                      altDirection
+                    ) as StopsResponse;
                     
-                    try {
-                      response = await getRouteStops(
-                        Number(routeId),
-                        Number(typeId),
-                        altDirection
-                      ) as StopsResponse;
-                      
-                      // If this works, we'll use these stops but keep them in the original selected direction
-                      console.log(`Successfully fetched stops using alternative direction ${altDirection}`);
-                      foundValidDirection = true;
-                      break;
-                    } catch (dirError) {
-                      console.error(`Direction ${altDirection} also failed:`, dirError);
-                      // Continue to the next direction
-                    }
+                    // If this works, we'll use these stops but keep them in the original selected direction
+                    console.log(`Successfully fetched stops using alternative direction ${altDirection}`);
+                    foundValidDirection = true;
+                    break;
+                  } catch (dirError) {
+                    console.error(`Direction ${altDirection} also failed:`, dirError);
+                    // Continue to the next direction
                   }
-                  
-                  if (!foundValidDirection) {
-                    throw new Error('All available directions failed');
-                  }
-                } else {
-                  throw new Error('No alternative directions available');
                 }
-              } catch (directionError) {
-                console.error(`Failed to find working direction, falling back to GTFS data:`, directionError);
                 
-                // If all directions fail, fall back to GTFS data
-                response = await getGTFSRouteStops(
-                  Number(routeId),
-                  Number(typeId),
-                  selectedDirection
-                ) as StopsResponse;
+                if (!foundValidDirection) {
+                  throw new Error('All available directions failed');
+                }
+              } else {
+                throw new Error('No alternative directions available');
               }
             }
           } else {
@@ -273,14 +287,16 @@ export default function RouteDetail() {
             ) as StopsResponse;
           }
         } catch (error) {
-          console.error('Error fetching stops, falling back to GTFS data:', error);
+          console.error('Error fetching stops:', error);
           
-          // Final fallback to GTFS data for all route types if PTV API fails
-          response = await getGTFSRouteStops(
-            Number(routeId),
-            Number(typeId),
-            selectedDirection
-          ) as StopsResponse;
+          // Initialize with an empty response if all attempts fail
+          response = {
+            stops: [],
+            status: {
+              version: '',
+              health: 0
+            }
+          };
         }
         
         // Log the raw response to see if stop_sequence is available
@@ -297,58 +313,74 @@ export default function RouteDetail() {
           sequence: stop.stop_sequence
         })));
         
-        // Process stops to add absolute_sequence for better sorting
+        // Extract sequence information from stops
+        console.log('Processing stop sequence information...');
+        
         const processedStops = response.stops.map(stop => {
           // Create a new object with all properties from the original stop
           const processedStop = { ...stop };
           
-          // According to PTV API documentation, stop_sequence is the primary field for ordering stops
-          // It returns 0 if route_id or run_id is not specified
+          // 1. FIRST CHOICE: API-provided stop_sequence - this is the most reliable source
           if (stop.stop_sequence !== undefined && stop.stop_sequence > 0) {
-            // Use stop_sequence as the primary sorting field when it's available and not zero
             processedStop.absolute_sequence = stop.stop_sequence;
-            console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop_sequence`);
-          }
-          // For tram routes, try additional methods if stop_sequence is 0 or undefined
-          else if (Number(typeId) === 1) {
-            // Try to extract stop number from name (e.g., "Bell St/Brunswick St #15")
-            const match = stop.stop_name.match(/#(\d+)/);
-            if (match) {
-              // Store the extracted number as absolute_sequence
-              processedStop.absolute_sequence = parseInt(match[1]);
-              console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop number in name`);
-            }
-            // If that fails, try to extract sequence from the stop ID
-            else if (stop.stop_id) {
-              // Some stop IDs contain sequence information
-              const stopIdStr = String(stop.stop_id);
-              const lastDigits = stopIdStr.slice(-2);
-              if (!isNaN(parseInt(lastDigits))) {
-                processedStop.absolute_sequence = parseInt(lastDigits);
-                console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop ID`);
-              } else {
-                // If no usable sequence information, use high number
-                processedStop.absolute_sequence = 999999;
-                console.log(`Tram stop ${stop.stop_name} assigned default high sequence`);
-              }
-            } else {
-              // If no sequence information available, use high number
-              processedStop.absolute_sequence = 999999;
-              console.log(`Tram stop ${stop.stop_name} assigned default high sequence`);
-            }
-          } else {
-            // For non-tram routes with no stop_sequence, use high number
-            processedStop.absolute_sequence = 999999;
-            console.log(`Stop ${stop.stop_name} assigned default high sequence`);
+            console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from API's stop_sequence`);
+            return processedStop;
           }
           
+          // 2. SECOND CHOICE: Extract from name if it contains a number with # prefix
+          const nameMatch = stop.stop_name.match(/#(\d+)/);
+          if (nameMatch) {
+            processedStop.absolute_sequence = parseInt(nameMatch[1]);
+            console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop name`);
+            return processedStop;
+          }
+          
+          // 3. THIRD CHOICE: For docklands stops with D prefix
+          if (stop.stop_name.includes('D')) {
+            const docklandsMatch = stop.stop_name.match(/D(\d+)/);
+            if (docklandsMatch) {
+              // Place these at the end of the sequence
+              processedStop.absolute_sequence = 100 + parseInt(docklandsMatch[1]);
+              console.log(`Docklands stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence}`);
+              return processedStop;
+            }
+          }
+          
+          // 4. FOURTH CHOICE: Extract from stop ID if possible
+          const stopIdStr = String(stop.stop_id);
+          if (stop.stop_id) {
+            const lastDigits = stopIdStr.slice(-2);
+            if (!isNaN(parseInt(lastDigits))) {
+              processedStop.absolute_sequence = parseInt(lastDigits);
+              console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop ID`);
+              return processedStop;
+            }
+          }
+          
+          // FALLBACK: If no sequence can be determined, use a high number
+          processedStop.absolute_sequence = 999999;
+          console.log(`Stop ${stop.stop_name} assigned default high sequence (no sequence info available)`);
           return processedStop;
         });
+        
+        // Log the processed stops with their sequences
+        const sequenceDebugInfo = processedStops.map(stop => ({
+          name: stop.stop_name, 
+          sequence: stop.absolute_sequence
+        }));
+        console.log('Stops with assigned sequences:', sequenceDebugInfo);
         
         // Sort stops by absolute_sequence
         const sortedStops = [...processedStops].sort((a, b) => {
           return (a.absolute_sequence || 999999) - (b.absolute_sequence || 999999);
         });
+        
+        // Log the sorted stops
+        console.log('Sorted stops:', sortedStops.map(stop => ({
+          name: stop.stop_name,
+          sequence: stop.absolute_sequence,
+          original_sequence: stop.stop_sequence
+        })));
         
         // Filter out stops with invalid sequence (optional)
         // const validStops = sortedStops.filter(stop => stop.absolute_sequence !== 999999);
@@ -469,7 +501,9 @@ export default function RouteDetail() {
   return (
     <Layout>
       <Head>
-        <title>PTV-LML | {routeName || 'Route'} Stops</title>
+        <title>PTV-LML | {routeNumber && Number(typeId) === 1 ? `Number ${routeNumber}: ` : ''}
+        {routeNumber && Number(typeId) === 2 ? `Route ${routeNumber}: ` : ''}
+        {routeName || 'Route'} Stops</title>
       </Head>
       
       <div className="container py-8">
@@ -482,6 +516,8 @@ export default function RouteDetail() {
           </Link>
           
           <h1 className={`text-3xl font-bold text-${routeTypeColor} mb-2 md:text-4xl`}>
+            {routeNumber && Number(typeId) === 1 ? `Number ${routeNumber}: ` : ''}
+            {routeNumber && Number(typeId) === 2 ? `Route ${routeNumber}: ` : ''}
             {routeName || 'Route'} Stops
           </h1>
           <p className="text-gray-600">
