@@ -45,7 +45,10 @@ interface Stop {
   stop_longitude: number;
   stop_sequence: number;
   route_type: number;
-  absolute_sequence?: number;
+  absolute_sequence?: number; // Legacy property
+  api_sequence?: number;      // Sequence from API
+  name_sequence?: number;     // Sequence extracted from name (e.g. #47)
+  docklands_sequence?: number; // For Docklands stops (D14-D18)
 }
 
 interface GigAhead extends GigWithStop {
@@ -166,66 +169,31 @@ export default function StopsAhead() {
           sequence: stop.stop_sequence
         })));
         
-        // Extract sequence information from stops
-        console.log('Processing stop sequence information...');
+        // Process stops - simplify by trusting the API's stop_sequence
+        console.log('Processing stops - using API stop_sequence for ordering');
         
-        const processedStops = response.stops.map((stop: Stop) => {
-          // Create a new object with all properties from the original stop
-          const processedStop = { ...stop };
-          
-          // 1. FIRST CHOICE: API-provided stop_sequence - this is the most reliable source
-          if (stop.stop_sequence !== undefined && stop.stop_sequence > 0) {
-            processedStop.absolute_sequence = stop.stop_sequence;
-            console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from API's stop_sequence`);
-            return processedStop;
+        // We trust that the API provides the correct ordering via stop_sequence
+        // when given the correct direction_id
+        const sortedStops = [...response.stops].sort((a, b) => {
+          // First priority: API-provided stop_sequence (when non-zero)
+          if (a.stop_sequence && b.stop_sequence) {
+            return a.stop_sequence - b.stop_sequence;
           }
           
-          // 2. SECOND CHOICE: Extract from name if it contains a number with # prefix
-          const nameMatch = stop.stop_name.match(/#(\d+)/);
-          if (nameMatch) {
-            processedStop.absolute_sequence = parseInt(nameMatch[1]);
-            console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop name`);
-            return processedStop;
+          // If only one has sequence, it comes first
+          if (a.stop_sequence) return -1;
+          if (b.stop_sequence) return 1;
+          
+          // Fallback to name-based sequence if available
+          const aNameMatch = a.stop_name.match(/#(\d+)/);
+          const bNameMatch = b.stop_name.match(/#(\d+)/);
+          
+          if (aNameMatch && bNameMatch) {
+            return parseInt(aNameMatch[1]) - parseInt(bNameMatch[1]);
           }
           
-          // 3. THIRD CHOICE: For docklands stops with D prefix
-          if (stop.stop_name.includes('D')) {
-            const docklandsMatch = stop.stop_name.match(/D(\d+)/);
-            if (docklandsMatch) {
-              // Place these at the end of the sequence
-              processedStop.absolute_sequence = 100 + parseInt(docklandsMatch[1]);
-              console.log(`Docklands stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence}`);
-              return processedStop;
-            }
-          }
-          
-          // 4. FOURTH CHOICE: Extract from stop ID if possible
-          const stopIdStr = String(stop.stop_id);
-          if (stop.stop_id) {
-            const lastDigits = stopIdStr.slice(-2);
-            if (!isNaN(parseInt(lastDigits))) {
-              processedStop.absolute_sequence = parseInt(lastDigits);
-              console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop ID`);
-              return processedStop;
-            }
-          }
-          
-          // FALLBACK: If no sequence can be determined, use a high number
-          processedStop.absolute_sequence = 999999;
-          console.log(`Stop ${stop.stop_name} assigned default high sequence (no sequence info available)`);
-          return processedStop;
-        });
-        
-        // Log the processed stops with their sequences
-        const sequenceDebugInfo = processedStops.map(stop => ({
-          name: stop.stop_name, 
-          sequence: stop.absolute_sequence
-        }));
-        console.log('Stops with assigned sequences:', sequenceDebugInfo);
-        
-        // Sort stops by absolute_sequence
-        const sortedStops = [...processedStops].sort((a, b) => {
-          return (a.absolute_sequence || 999999) - (b.absolute_sequence || 999999);
+          // Last resort: sort by stop_id
+          return a.stop_id - b.stop_id;
         });
         
         // Log the sorted stops
