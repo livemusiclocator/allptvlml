@@ -335,12 +335,19 @@ export function isGigReachable(
   const gigTime = new Date(gigStartTime);
   const now = new Date(currentTime);
   
-  // Add travel time to current time
-  const arrivalTime = new Date(now.getTime() + travelTimeMinutes * 60 * 1000);
+  console.log(`Checking reachability for gig at ${gigTime.toISOString()}`);
+  console.log(`Current time: ${now.toISOString()}`);
+  console.log(`Travel time: ${travelTimeMinutes} minutes`);
   
-  // Add 2 hours buffer to gig start time (as per requirements)
-  const gigTimePlus2Hours = new Date(gigTime.getTime() + 2 * 60 * 60 * 1000);
+  // Calculate when the gig would be over including travel time and buffer
+  // (gig start time + travel time + 3 hours buffer)
+  const gigEndWithBuffer = new Date(
+    gigTime.getTime() + (travelTimeMinutes + 180) * 60 * 1000
+  );
   
-  // Gig is reachable if arrival time is before gig start time + 2 hours
-  return arrivalTime < gigTimePlus2Hours;
+  console.log(`Gig end time with buffer: ${gigEndWithBuffer.toISOString()}`);
+  console.log(`Is gig still reachable: ${now < gigEndWithBuffer}`);
+  
+  // Gig is reachable if it hasn't already passed (including buffer)
+  return now < gigEndWithBuffer;
 }

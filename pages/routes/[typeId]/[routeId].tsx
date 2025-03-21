@@ -178,19 +178,105 @@ export default function RouteDetail() {
           }
         }
         
-        let response: StopsResponse;
+        // Initialize response with a default empty value
+        let response: StopsResponse = {
+          stops: [],
+          status: {
+            version: '',
+            health: 1
+          }
+        };
         
-        // Use GTFS data for SkyBus and Night Bus
-        if (Number(typeId) === 5 || Number(typeId) === 4) {
-          console.log(`Using GTFS data for route type ${typeId}`);
+        try {
+          // Use GTFS data for SkyBus and Night Bus
+          if (Number(typeId) === 5 || Number(typeId) === 4) {
+            console.log(`Using GTFS data for route type ${typeId}`);
+            response = await getGTFSRouteStops(
+              Number(routeId),
+              Number(typeId),
+              selectedDirection
+            ) as StopsResponse;
+          }
+          // Special handling for tram routes #11 and #96 which might have issues
+          else if (Number(typeId) === 1 && (Number(routeId) === 11 || Number(routeId) === 96)) {
+            console.log(`Using PTV API with fallback for tram route ${routeId}`);
+            try {
+              // Try PTV API first
+              response = await getRouteStops(
+                Number(routeId),
+                Number(typeId),
+                selectedDirection
+              ) as StopsResponse;
+            } catch (ptvError) {
+              console.error(`Error fetching stops for tram route ${routeId}, trying alternative direction:`, ptvError);
+              
+              // If the selected direction fails, try to get all available directions for this route
+              console.log(`Fetching all available directions for route ${routeId}`);
+              
+              try {
+                // Get all directions for this route
+                const directionsResponse = await getRouteDirections(Number(routeId)) as DirectionsResponse;
+                const availableDirections = directionsResponse.directions.map(d => d.direction_id);
+                
+                console.log(`Available directions for route ${routeId}:`, availableDirections);
+                
+                // Filter out the current direction that already failed
+                const alternativeDirections = availableDirections.filter(d => d !== selectedDirection);
+                
+                if (alternativeDirections.length > 0) {
+                  // Try each alternative direction until one works
+                  let foundValidDirection = false;
+                  
+                  for (const altDirection of alternativeDirections) {
+                    console.log(`Trying alternative direction ${altDirection} for route ${routeId}`);
+                    
+                    try {
+                      response = await getRouteStops(
+                        Number(routeId),
+                        Number(typeId),
+                        altDirection
+                      ) as StopsResponse;
+                      
+                      // If this works, we'll use these stops but keep them in the original selected direction
+                      console.log(`Successfully fetched stops using alternative direction ${altDirection}`);
+                      foundValidDirection = true;
+                      break;
+                    } catch (dirError) {
+                      console.error(`Direction ${altDirection} also failed:`, dirError);
+                      // Continue to the next direction
+                    }
+                  }
+                  
+                  if (!foundValidDirection) {
+                    throw new Error('All available directions failed');
+                  }
+                } else {
+                  throw new Error('No alternative directions available');
+                }
+              } catch (directionError) {
+                console.error(`Failed to find working direction, falling back to GTFS data:`, directionError);
+                
+                // If all directions fail, fall back to GTFS data
+                response = await getGTFSRouteStops(
+                  Number(routeId),
+                  Number(typeId),
+                  selectedDirection
+                ) as StopsResponse;
+              }
+            }
+          } else {
+            console.log(`Using PTV API for route type ${typeId}`);
+            response = await getRouteStops(
+              Number(routeId),
+              Number(typeId),
+              selectedDirection
+            ) as StopsResponse;
+          }
+        } catch (error) {
+          console.error('Error fetching stops, falling back to GTFS data:', error);
+          
+          // Final fallback to GTFS data for all route types if PTV API fails
           response = await getGTFSRouteStops(
-            Number(routeId),
-            Number(typeId),
-            selectedDirection
-          ) as StopsResponse;
-        } else {
-          console.log(`Using PTV API for route type ${typeId}`);
-          response = await getRouteStops(
             Number(routeId),
             Number(typeId),
             selectedDirection
@@ -204,33 +290,56 @@ export default function RouteDetail() {
         const hasStopSequence = response.stops.some(stop => stop.stop_sequence !== undefined);
         console.log('Has stop_sequence property:', hasStopSequence);
         
+        // Log all stops with their sequence information for debugging
+        console.log('All stops with sequence info:', response.stops.map(stop => ({
+          name: stop.stop_name,
+          id: stop.stop_id,
+          sequence: stop.stop_sequence
+        })));
+        
         // Process stops to add absolute_sequence for better sorting
         const processedStops = response.stops.map(stop => {
           // Create a new object with all properties from the original stop
           const processedStop = { ...stop };
           
-          // For tram routes, extract the stop number from the name
-          if (Number(typeId) === 1) {
+          // According to PTV API documentation, stop_sequence is the primary field for ordering stops
+          // It returns 0 if route_id or run_id is not specified
+          if (stop.stop_sequence !== undefined && stop.stop_sequence > 0) {
+            // Use stop_sequence as the primary sorting field when it's available and not zero
+            processedStop.absolute_sequence = stop.stop_sequence;
+            console.log(`Stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop_sequence`);
+          }
+          // For tram routes, try additional methods if stop_sequence is 0 or undefined
+          else if (Number(typeId) === 1) {
+            // Try to extract stop number from name (e.g., "Bell St/Brunswick St #15")
             const match = stop.stop_name.match(/#(\d+)/);
             if (match) {
               // Store the extracted number as absolute_sequence
               processedStop.absolute_sequence = parseInt(match[1]);
-              console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop number`);
-            } else if (stop.stop_sequence !== undefined && stop.stop_sequence > 0) {
-              // Use stop_sequence if available and > 0
-              processedStop.absolute_sequence = stop.stop_sequence;
-              console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop_sequence`);
+              console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop number in name`);
+            }
+            // If that fails, try to extract sequence from the stop ID
+            else if (stop.stop_id) {
+              // Some stop IDs contain sequence information
+              const stopIdStr = String(stop.stop_id);
+              const lastDigits = stopIdStr.slice(-2);
+              if (!isNaN(parseInt(lastDigits))) {
+                processedStop.absolute_sequence = parseInt(lastDigits);
+                console.log(`Tram stop ${stop.stop_name} assigned sequence ${processedStop.absolute_sequence} from stop ID`);
+              } else {
+                // If no usable sequence information, use high number
+                processedStop.absolute_sequence = 999999;
+                console.log(`Tram stop ${stop.stop_name} assigned default high sequence`);
+              }
             } else {
-              // If no number in name or valid stop_sequence, use high number
+              // If no sequence information available, use high number
               processedStop.absolute_sequence = 999999;
               console.log(`Tram stop ${stop.stop_name} assigned default high sequence`);
             }
           } else {
-            // For non-tram routes, use stop_sequence if > 0, otherwise high number
-            processedStop.absolute_sequence =
-              (stop.stop_sequence !== undefined && stop.stop_sequence > 0)
-                ? stop.stop_sequence
-                : 999999;
+            // For non-tram routes with no stop_sequence, use high number
+            processedStop.absolute_sequence = 999999;
+            console.log(`Stop ${stop.stop_name} assigned default high sequence`);
           }
           
           return processedStop;
@@ -380,27 +489,54 @@ export default function RouteDetail() {
           </p>
         </div>
         
-        {/* Direction selector */}
+        {/* Direction selector using radio buttons */}
         {directions.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-lg font-semibold mb-2">Select Direction:</h2>
-            <div className="flex flex-wrap gap-2">
-              {directions.map((direction) => (
-                <button
-                  key={direction.direction_id}
-                  className={`px-4 py-2 rounded-md ${
-                    selectedDirection === direction.direction_id
-                      ? `bg-${routeTypeColor} text-white`
-                      : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-                  }`}
-                  onClick={() => setSelectedDirection(direction.direction_id)}
-                >
-                  {direction.direction_name.includes('To ') || direction.direction_name.includes('to ')
-                    ? direction.direction_name
-                    : `to ${direction.direction_name}`}
-                </button>
-              ))}
-            </div>
+            <fieldset>
+              <legend className="text-lg font-semibold mb-2">Select Direction:</legend>
+              <div className="space-y-2 mb-2">
+                {directions.map((direction) => {
+                  // Format direction name to include "To" prefix if not already present
+                  let displayName = direction.direction_name;
+                  if (!displayName.toLowerCase().startsWith('to ')) {
+                    displayName = `To ${displayName}`;
+                  }
+                  
+                  const isSelected = selectedDirection === direction.direction_id;
+                  const id = `direction-${direction.direction_id}`;
+                  
+                  return (
+                    <div key={direction.direction_id} className="flex items-center">
+                      <input
+                        type="radio"
+                        id={id}
+                        name="direction"
+                        value={direction.direction_id}
+                        checked={isSelected}
+                        onChange={() => setSelectedDirection(direction.direction_id)}
+                        className={`w-5 h-5 text-${routeTypeColor} focus:ring-${routeTypeColor} border-gray-300`}
+                      />
+                      <label 
+                        htmlFor={id} 
+                        className={`ml-2 text-base ${isSelected ? 'font-bold' : 'font-normal'}`}
+                      >
+                        {displayName}
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </fieldset>
+            
+            {selectedDirection !== null && directions.length > 0 && (
+              <div className={`text-sm bg-${routeTypeColor} bg-opacity-10 text-${routeTypeColor} p-2 rounded-md mt-2 inline-block`}>
+                Currently showing stops heading {
+                  directions.find(d => d.direction_id === selectedDirection)?.direction_name.toLowerCase().startsWith('to ') 
+                    ? directions.find(d => d.direction_id === selectedDirection)?.direction_name
+                    : `to ${directions.find(d => d.direction_id === selectedDirection)?.direction_name}`
+                }
+              </div>
+            )}
           </div>
         )}
         
@@ -465,7 +601,7 @@ export default function RouteDetail() {
                   {/* Stops Ahead Link */}
                   <div className="mt-2 border-t pt-2">
                     <Link
-                      href={`/routes/${typeId}/${routeId}/${stop.stop_id}/stops-ahead?directionId=${selectedDirection}`}
+                      href={`/routes/${typeId}/${routeId}/direction/${selectedDirection}/stop/${stop.stop_id}/stops-ahead`}
                       className="text-sm text-music-purple hover:underline focus:outline-none inline-flex items-center"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
