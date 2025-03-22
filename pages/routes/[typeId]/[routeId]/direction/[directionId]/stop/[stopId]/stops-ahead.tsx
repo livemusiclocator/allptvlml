@@ -373,13 +373,25 @@ export default function StopsAhead() {
           <div className="space-y-6">
             {gigsAhead.length > 0 ? (
               <>
-                {/* First show reachable gigs */}
+                {/* First show reachable gigs, sorted by start time */}
                 {gigsAhead.filter(gig => gig.isReachable).length > 0 && (
                   <div className="mb-4">
                     <h2 className="text-xl font-semibold text-green-600 mb-3">Reachable Gigs</h2>
                     <div className="space-y-4">
                       {gigsAhead
                         .filter(gig => gig.isReachable)
+                        .sort((a, b) => {
+                          // Convert to 24-hour time format or use default
+                          const timeA = a.start_time || '19:00:00';
+                          const timeB = b.start_time || '19:00:00';
+                          
+                          // Compare dates first
+                          const dateComparison = a.date.localeCompare(b.date);
+                          if (dateComparison !== 0) return dateComparison;
+                          
+                          // If same date, compare times
+                          return timeA.localeCompare(timeB);
+                        })
                         .map((gig) => (
                           <div key={`${gig.id}-${gig.stopId}`} className="card p-4 border-l-4 border-green-500">
                             <h3 className="text-lg font-semibold text-music-purple">{gig.name}</h3>
@@ -409,13 +421,25 @@ export default function StopsAhead() {
                   </div>
                 )}
                 
-                {/* Then show non-reachable gigs, if any */}
+                {/* Then show non-reachable gigs, if any, sorted by start time */}
                 {gigsAhead.filter(gig => !gig.isReachable).length > 0 && (
                   <div className="mt-8">
                     <h2 className="text-xl font-semibold text-yellow-600 mb-3">Other Gigs</h2>
                     <div className="space-y-4">
                       {gigsAhead
                         .filter(gig => !gig.isReachable)
+                        .sort((a, b) => {
+                          // Convert to 24-hour time format or use default
+                          const timeA = a.start_time || '19:00:00';
+                          const timeB = b.start_time || '19:00:00';
+                          
+                          // Compare dates first
+                          const dateComparison = a.date.localeCompare(b.date);
+                          if (dateComparison !== 0) return dateComparison;
+                          
+                          // If same date, compare times
+                          return timeA.localeCompare(timeB);
+                        })
                         .map((gig) => (
                           <div key={`${gig.id}-${gig.stopId}`} className="card p-4 border-l-4 border-yellow-400 opacity-80">
                             <h3 className="text-lg font-semibold text-music-purple">{gig.name}</h3>
