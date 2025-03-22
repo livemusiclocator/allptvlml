@@ -3,8 +3,8 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
   // Configure for GitHub Pages deployment under livemusiclocator organization
-  assetPrefix: process.env.NODE_ENV === 'production' ? '/ptv-lml' : '',
-  basePath: process.env.NODE_ENV === 'production' ? '/ptv-lml' : '',
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/allptvlml' : '',
+  basePath: process.env.NODE_ENV === 'production' ? '/allptvlml' : '',
   trailingSlash: true,
   // Optimize images
   images: {
