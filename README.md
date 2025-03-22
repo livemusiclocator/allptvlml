@@ -1,4 +1,4 @@
-# PTV-LML (Public Transport Victoria - Live Music Locator)
+# AllPTVLML (Public Transport Victoria - Live Music Locator)
 
 A Next.js web application that displays Public Transport Victoria (PTV) route information and integrates with live music gig data. This application is designed to be deployed on GitHub Pages.
 
@@ -25,7 +25,7 @@ A Next.js web application that displays Public Transport Victoria (PTV) route in
 ## Project Structure
 
 ```
-ptv-lml/
+allptvlml/
 ├── components/         # React components
 ├── lib/                # Utility functions and API clients
 ├── pages/              # Next.js pages
@@ -39,8 +39,8 @@ ptv-lml/
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/ptv-lml.git
-cd ptv-lml
+git clone https://github.com/livemusiclocator/allptvlml.git
+cd allptvlml
 ```
 
 2. Install dependencies:
