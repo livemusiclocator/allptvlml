@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
-  // Configure for GitHub Pages deployment
+  // Configure for GitHub Pages deployment under livemusiclocator organization
   assetPrefix: process.env.NODE_ENV === 'production' ? '/ptv-lml' : '',
   basePath: process.env.NODE_ENV === 'production' ? '/ptv-lml' : '',
   trailingSlash: true,
