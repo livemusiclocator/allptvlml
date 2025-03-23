@@ -15,8 +15,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
-  // For development, don't use static export
-  output: process.env.NODE_ENV === 'production' ? 'export' : undefined,
+  // Always use static export for production builds
+  output: 'export',
   
   // Environment variables passed to the client
   env: {
