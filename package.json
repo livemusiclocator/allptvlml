@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "export": "next export",
-    "deploy": "next build && touch out/.nojekyll && gh-pages -d out -b main"
+    "deploy": "next build && next export && touch out/.nojekyll && gh-pages -d out -b main"
   },
   "dependencies": {
     "axios": "^1.5.0",
